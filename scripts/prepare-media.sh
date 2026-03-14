@@ -25,6 +25,7 @@ WINDOWS_AUTOINSTALL_ROOT="${AUTOINSTALL_ROOT}/windows"
 UBUNTU_SRC="${MEDIA_ROOT}/ubuntu/24.04.4"
 WINDOWS_SRC="${MEDIA_ROOT}/windows/11"
 WINDOWS_OEM_ROOT="${WINDOWS_SRC}/sources/\$OEM\$/\$\$/Setup/Scripts"
+WINDOWS_WIM_XML="${WINDOWS_SRC}/sources/install.wim.xml"
 TFTP_ROOT="${MEDIA_ROOT}/tftpboot"
 UBUNTU_PACKAGES_FILE="${CONFIG_ROOT}/ubuntu-packages.txt"
 WINDOWS_WINGET_FILE="${CONFIG_ROOT}/windows-winget-packages.txt"
@@ -77,6 +78,25 @@ download_wimboot() {
   log "Downloading wimboot"
   curl -fL --retry 5 --retry-delay 5 --progress-bar -o "${out}" \
     "https://github.com/ipxe/wimboot/releases/latest/download/wimboot"
+}
+
+extract_windows_wim_metadata() {
+  if [[ -s "${WINDOWS_WIM_XML}" ]]; then
+    log "Reusing ${WINDOWS_WIM_XML}"
+    return
+  fi
+  log "Extracting Windows WIM metadata"
+  python3 - "${WINDOWS_SRC}/sources/install.wim" "${WINDOWS_WIM_XML}" <<'PY'
+import subprocess
+import sys
+
+src = sys.argv[1]
+dst = sys.argv[2]
+raw = subprocess.check_output(["7z", "x", "-so", src, "[1].xml"])
+text = raw.decode("utf-16le", errors="ignore").lstrip("\ufeff")
+with open(dst, "w", encoding="utf-8") as handle:
+    handle.write(text)
+PY
 }
 
 ensure_config_defaults() {
@@ -429,25 +449,7 @@ EOF
 write_ipxe_menu() {
   cat > "${HTTP_BOOT_ROOT}/menu.ipxe" <<EOF
 #!ipxe
-set base-url ${PROXY_HTTP_URL}
-menu Foreman PXE Menu
-item ubuntu Ubuntu 24.04.4 Desktop Live Installer
-item windows Windows 11 Installer
-choose target && goto \${target}
-
-:ubuntu
-kernel \${base-url}/ubuntu/24.04.4/casper/vmlinuz ip=dhcp url=${PROXY_HTTP_URL}/ubuntu/24.04.4/ubuntu-24.04.4-desktop-amd64.iso autoinstall ds=nocloud-net\\;s=${PROXY_HTTP_URL}/autoinstall/ubuntu/
-initrd \${base-url}/ubuntu/24.04.4/casper/initrd
-boot
-
-:windows
-kernel \${base-url}/boot/wimboot
-initrd \${base-url}/windows/11/bootmgr bootmgr
-initrd \${base-url}/windows/11/boot/bcd BCD
-initrd \${base-url}/windows/11/boot/boot.sdi boot.sdi
-initrd \${base-url}/windows/11/sources/boot.wim boot.wim
-initrd \${base-url}/autoinstall/windows/Autounattend.xml Autounattend.xml
-boot
+chain ${FOREMAN_PROXY_URL}/boot.ipxe?mac=\${net0/mac}\&uuid=\${uuid}\&serial=\${serial} || shell
 EOF
 }
 
@@ -460,6 +462,7 @@ log "Copying Ubuntu ISO into HTTP media root"
 cp -f "${ISO_CACHE}/ubuntu-24.04.4-desktop-amd64.iso" "${UBUNTU_SRC}/ubuntu-24.04.4-desktop-amd64.iso"
 extract_iso "${ISO_CACHE}/ubuntu-24.04.4-desktop-amd64.iso" "${UBUNTU_SRC}"
 extract_iso "${ISO_CACHE}/windows11-x64.iso" "${WINDOWS_SRC}"
+extract_windows_wim_metadata
 download_wimboot
 prepare_tftp_root
 log "Writing Ubuntu autoinstall configuration"

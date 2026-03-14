@@ -95,6 +95,28 @@ require_id() {
   fi
 }
 
+file_text_or_empty() {
+  local path="$1"
+  if [[ -f "${path}" ]]; then
+    cat "${path}"
+  fi
+}
+
+ensure_common_parameter() {
+  local name="$1"
+  local value="$2"
+  local id body
+  id="$(lookup_id "/common_parameters" "name=\"${name}\"")"
+  body="$(jq -nc --arg name "${name}" --arg value "${value}" '{common_parameter:{name:$name,value:$value}}')"
+  if [[ -z "${id}" ]]; then
+    log "Creating common parameter ${name}"
+    id="$(parse_api_response "$(api_post "/common_parameters" "${body}")" | jq -r '.id // empty')"
+  else
+    parse_api_response "$(api_put "/common_parameters/${id}" "${body}")" >/dev/null
+  fi
+  require_id "common parameter ${name}" "${id}"
+}
+
 ORG_ID="$(ensure_named_resource "/organizations" "name=\"${FOREMAN_ORGANIZATION}\"" "{\"organization\":{\"name\":\"${FOREMAN_ORGANIZATION}\"}}")"
 LOC_ID="$(ensure_named_resource "/locations" "name=\"${FOREMAN_LOCATION}\"" "{\"location\":{\"name\":\"${FOREMAN_LOCATION}\"}}")"
 DOMAIN_ID="$(ensure_named_resource "/domains" "name=\"${PXE_DOMAIN}\"" "{\"domain\":{\"name\":\"${PXE_DOMAIN}\"}}")"
@@ -163,6 +185,24 @@ else
     '{subnet:{domain_ids:$domain_ids,location_ids:$location_ids,organization_ids:$organization_ids,tftp_id:$tftp_id,httpboot_id:$httpboot_id,dhcp_id:$dhcp_id}}')"
   parse_api_response "$(api_put "/subnets/${SUBNET_ID}" "${SUBNET_BODY}")" >/dev/null
 fi
+
+ensure_common_parameter "provision_method" "ubuntu"
+ensure_common_parameter "ubuntu_autoinstall_username" "${UBUNTU_AUTOINSTALL_USERNAME}"
+ensure_common_parameter "ubuntu_autoinstall_password" "${UBUNTU_AUTOINSTALL_PASSWORD}"
+ensure_common_parameter "ubuntu_autoinstall_realname" "${UBUNTU_AUTOINSTALL_REALNAME}"
+ensure_common_parameter "ubuntu_autoinstall_hostname" "${UBUNTU_AUTOINSTALL_HOSTNAME}"
+ensure_common_parameter "ubuntu_autoinstall_locale" "${UBUNTU_AUTOINSTALL_LOCALE}"
+ensure_common_parameter "ubuntu_autoinstall_keyboard" "${UBUNTU_AUTOINSTALL_KEYBOARD}"
+ensure_common_parameter "ubuntu_autoinstall_timezone" "${UBUNTU_AUTOINSTALL_TIMEZONE}"
+ensure_common_parameter "ubuntu_packages" "$(file_text_or_empty "${ROOT_DIR}/config/ubuntu-packages.txt")"
+ensure_common_parameter "windows_image_name" "${WINDOWS_IMAGE_NAME}"
+ensure_common_parameter "windows_local_admin_user" "${WINDOWS_LOCAL_ADMIN_USER}"
+ensure_common_parameter "windows_local_admin_password" "${WINDOWS_LOCAL_ADMIN_PASSWORD}"
+ensure_common_parameter "windows_computer_name" "${WINDOWS_COMPUTER_NAME}"
+ensure_common_parameter "windows_locale" "${WINDOWS_LOCALE}"
+ensure_common_parameter "windows_target_disk" "${WINDOWS_TARGET_DISK}"
+ensure_common_parameter "windows_winget_packages" "$(file_text_or_empty "${ROOT_DIR}/config/windows-winget-packages.txt")"
+ensure_common_parameter "windows_postinstall_ps1" "$(file_text_or_empty "${ROOT_DIR}/config/windows-postinstall.ps1")"
 
 printf 'Configured organization %s (%s)\n' "${FOREMAN_ORGANIZATION}" "${ORG_ID}"
 printf 'Configured location %s (%s)\n' "${FOREMAN_LOCATION}" "${LOC_ID}"
